@@ -5,7 +5,7 @@ import atexit
 
 from queue import Queue
 
-from flask import Flask, request, redirect, jsonify, render_template
+from flask import Flask, request, redirect, jsonify, render_template, send_from_directory
 from flask_wtf import FlaskForm
 # from flask_wtf.csrf import CSRFProtect
 from flask_wtf.file import FileField, FileRequired
@@ -119,6 +119,16 @@ def paginate(tracks, start=0, limit=10):
         return tracks[start:end]
     except IndexError:
         return tracks[start:]
+
+
+@app.route('/<path:resource>')
+def public_resource(resource):
+    return send_from_directory('resources', resource)
+
+
+@app.route('/')
+def root():
+    return public_resource('index.html')
 
 
 @app.route('/api/tracks', methods=['GET'])
