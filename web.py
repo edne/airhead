@@ -162,6 +162,19 @@ def enqueue(uuid):
     return '', 200
 
 
+@app.route('/api/upload', methods=['POST'])
+def upload_api():
+    form = UploadForm()
+
+    uuid = str(uuid4())
+    path = os.path.join(conf_paths['Upload'], uuid)
+    f = form.track.data
+
+    f.save(path)
+    transcoder_queue.put(uuid)
+    return redirect('/')
+
+
 @app.route('/tracks')
 def tracks_():
     tracks = [get_tags(uuid)
