@@ -116,14 +116,10 @@ def paginate(tracks, start=0, limit=10):
         return tracks[start:]
 
 
-@app.route('/<path:resource>')
-def public_resource(resource):
-    return send_from_directory('resources', resource)
-
-
 @app.route('/')
-def root():
-    return public_resource('index.html')
+@app.route('/<path:resource>')
+def public_resource(resource='index.html'):
+    return send_from_directory('resources', resource)
 
 
 @app.route('/api/tracks', methods=['GET'])
