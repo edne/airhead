@@ -1,24 +1,16 @@
+#!/usr/bin/env python3
 import os.path
 from uuid import uuid4
 import json
 import atexit
+import logging
 
 from queue import Queue
-
-from flask import Flask, request, jsonify, send_from_directory
-from flask_wtf import FlaskForm
-from flask_wtf.file import FileField, FileRequired
-from wtforms.validators import StopValidation
-
-import mutagen
-from mutagen.oggvorbis import OggVorbis
-from mutagen.mp3 import MP3
-from mutagen.flac import FLAC
+from aiohttp import web
 
 from airhead.config import get_config
 from airhead.transmitter import Transmitter
 from airhead.transcoder import Transcoder
-
 
 conf = get_config()
 
@@ -33,44 +25,6 @@ transcoder = Transcoder(conf, transcoder_queue)
 transcoder.daemon = True
 transcoder.start()
 atexit.register(transcoder.join)
-
-app = Flask(__name__)
-
-app.config['WTF_CSRF_ENABLED'] = False
-
-app.jinja_env.trim_blocks = True
-app.jinja_env.lstrip_blocks = True
-
-
-class AudioFileRequired:
-    """
-    Validates that an uploaded file from a flask_wtf FileFiled is actually
-    an audio file (Vorbis or MP3 for the moment) using mutagen to check
-    the headers.
-    """
-
-    field_flags = ('required', )
-
-    DEFAULT_MESSAGE = "Invalid audio file."
-
-    def __init__(self, message=None):
-        self.message = (message if message
-                        else self.DEFAULT_MESSAGE)
-
-    def __call__(self, form, field):
-        s = field.data.stream
-        f = mutagen.File(s)
-
-        if not (isinstance(f, OggVorbis)
-                or isinstance(f, MP3)
-                or isinstance(f, FLAC)):
-            raise StopValidation(self.message)
-
-        s.seek(0)
-
-
-class UploadForm(FlaskForm):
-    track = FileField(validators=[FileRequired(), AudioFileRequired()])
 
 
 def get_tags(uuid):
@@ -122,80 +76,104 @@ def paginate(tracks, start=0, limit=10):
         return tracks[start:]
 
 
-@app.route('/api/info', methods=['GET'])
-def info():
+async def info(request):
     info = {
         'name': conf.get('WEB', 'Name'),
         'greet_message': conf.get('WEB', 'GreetMessage'),
-        'stream_url': "http://{}:{}/{}".format(
+        'stream_url': 'http://{}:{}/{}'.format(
             conf.get('TRANSMITTER', 'Host'),
             conf.get('TRANSMITTER', 'Port'),
             conf.get('TRANSMITTER', 'Mount'))
     }
-    return jsonify(**info), 200
+    return web.json_response(info)
 
 
-@app.route('/api/tracks', methods=['GET'])
-def tracks():
-    start = int(request.args.get('start', '0'))
-    limit = int(request.args.get('limit', '10'))
-    query = request.args.get('q', None)
+async def tracks(request):
+    start = int(request.query.get('start', '0'))
+    limit = int(request.query.get('limit', '10'))
+    q = request.query.get('q', None)
 
     tracks = [get_tags(uuid)
-              for uuid in get_tracks(query)]
+              for uuid in get_tracks(q)]
 
-    return jsonify(total=len(tracks),
-                   items=paginate(tracks, start, limit)), 200
-
-
-@app.route('/api/tracks', methods=['POST'])
-def upload():
-    form = UploadForm()
-
-    if form.validate_on_submit():
-        uuid = str(uuid4())
-        path = os.path.join(conf.get('PATHS', 'Upload'), uuid)
-        f = form.track.data
-
-        f.save(path)
-        transcoder_queue.put(uuid)
-        return jsonify(uuid=uuid), 202
-    else:
-        return '', 400
+    return web.json_response({'total': len(tracks),
+                              'items': paginate(tracks, start, limit)})
 
 
-@app.route('/api/queue', methods=['GET'])
-def queue():
-    start = int(request.args.get('start', '0'))
-    limit = int(request.args.get('limit', '10'))
+class AudioFileRequired:
+    field_flags = ('required', )
+
+    DEFAULT_MESSAGE = "Invalid audio file."
+
+    def __init__(self, message=None):
+        self.message = (message if message
+                        else self.DEFAULT_MESSAGE)
+
+
+async def upload(request):
+    uuid = str(uuid4())
+    path = os.path.join(conf.get('PATHS', 'Upload'), uuid)
+
+    reader = await request.multipart()
+    data = await reader.next()
+
+    # TODO: validate input
+    with open(path, 'wb') as f:
+        while True:
+            chunk = await data.read_chunk()
+            if not chunk:
+                break
+            f.write(chunk)
+
+    transcoder_queue.put(uuid)
+    return web.json_response({'uuid': 202})
+
+
+async def queue(request):
+    start = int(request.query.get('start', '0'))
+    limit = int(request.query.get('limit', '10'))
 
     tracks = [get_tags(uuid)
               for uuid in transmitter_queue.queue]
 
-    return jsonify(total=len(tracks),
-                   items=paginate(tracks, start, limit)), 200
+    return web.json_response({'total': len(tracks),
+                              'items': paginate(tracks, start, limit)})
 
 
-@app.route('/api/queue/<uuid:uuid>', methods=['PUT'])
-def enqueue(uuid):
+def enqueue(request):
+    uuid = request.match_info['uuid']
     transmitter_queue.put(str(uuid))
-    return '', 200
+    return web.Response()
 
 
-@app.route('/api/queue/current', methods=['GET'])
-def now_playing():
+async def now_playing(request):
     uuid = transmitter.now_playing
     track = get_tags(uuid) if uuid else {}
 
-    return jsonify(track=track), 200
+    return web.json_response({'track': track})
 
 
-@app.route('/')
-@app.route('/<path:resource>')
-def public_resource(resource='index.html'):
-    return send_from_directory(conf.get('PATHS', 'Resources'), resource)
+async def index(request):
+    return web.FileResponse(os.path.join(conf.get('PATHS', 'Resources'),
+                                         'index.html'))
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080,
-            debug=conf.getboolean('GENERAL', 'Debug'))
+    if conf.getboolean('GENERAL', 'Debug'):
+        logging.basicConfig(level=logging.DEBUG)
+
+    app = web.Application()
+
+    app.router.add_get('/api/info', info)
+
+    app.router.add_get('/api/tracks', tracks)
+    app.router.add_post('/api/tracks', upload)
+
+    app.router.add_get('/api/queue', queue)
+    app.router.add_put('/api/queue/{uuid}', enqueue)
+    app.router.add_get('/api/queue/current', now_playing)
+
+    app.router.add_get('/', index)
+    app.router.add_static('/', conf.get('PATHS', 'Resources'))
+
+    web.run_app(app, host='0.0.0.0', port=8080)
