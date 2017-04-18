@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os.path
+import os
 from uuid import uuid4
 import json
 import atexit
@@ -7,6 +7,11 @@ import logging
 
 from queue import Queue
 from aiohttp import web
+
+import mutagen
+from mutagen.oggvorbis import OggVorbis
+from mutagen.mp3 import MP3
+from mutagen.flac import FLAC
 
 from airhead.config import get_config
 from airhead.transmitter import Transmitter
@@ -100,14 +105,12 @@ async def tracks(request):
                               'items': paginate(tracks, start, limit)})
 
 
-class AudioFileRequired:
-    field_flags = ('required', )
-
-    DEFAULT_MESSAGE = "Invalid audio file."
-
-    def __init__(self, message=None):
-        self.message = (message if message
-                        else self.DEFAULT_MESSAGE)
+def is_valid_audio_file(path):
+    with open(path, 'rb') as stream:
+        f = mutagen.File(stream)
+        return (isinstance(f, OggVorbis)
+                or isinstance(f, MP3)
+                or isinstance(f, FLAC))
 
 
 async def upload(request):
@@ -117,13 +120,16 @@ async def upload(request):
     reader = await request.multipart()
     data = await reader.next()
 
-    # TODO: validate input
     with open(path, 'wb') as f:
         while True:
             chunk = await data.read_chunk()
             if not chunk:
                 break
             f.write(chunk)
+
+    if not is_valid_audio_file(path):
+        os.remove(path)
+        raise Exception('Invalid audio file.')
 
     transcoder_queue.put(uuid)
     return web.json_response({'uuid': 202})
