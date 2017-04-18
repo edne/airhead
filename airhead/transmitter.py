@@ -1,8 +1,10 @@
 import os.path
-
+import logging
 from threading import Thread, Event
-
 import shouty
+
+
+log = logging.getLogger(__name__)
 
 
 class Transmitter(Thread):
@@ -39,10 +41,12 @@ class Transmitter(Thread):
 
                 if self.queue.empty():
                     self.now_playing = None
+                    log.debug('Queue is empty')
                     connection.send_file(self.idle_media)
 
                 else:
                     uuid = self.queue.get(True)
+                    log.debug('Sending {}'.format(uuid))
                     self.now_playing = uuid
                     path = os.path.join(self.conf.get('PATHS', 'Tracks'), uuid)
 
