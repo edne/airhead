@@ -72,15 +72,6 @@ def get_tracks(query=None):
     return tracks
 
 
-def paginate(tracks, start=0, limit=10):
-    end = start + limit
-
-    try:
-        return tracks[start:end]
-    except IndexError:
-        return tracks[start:]
-
-
 async def info(request):
     info = {
         'name': conf.get('WEB', 'Name'),
@@ -94,15 +85,13 @@ async def info(request):
 
 
 async def tracks(request):
-    start = int(request.query.get('start', '0'))
-    limit = int(request.query.get('limit', '10'))
     q = request.query.get('q', None)
 
     tracks = [get_tags(uuid)
               for uuid in get_tracks(q)]
 
     return web.json_response({'total': len(tracks),
-                              'items': paginate(tracks, start, limit)})
+                              'items': tracks})
 
 
 def is_valid_audio_file(path):
@@ -136,14 +125,11 @@ async def upload(request):
 
 
 async def queue(request):
-    start = int(request.query.get('start', '0'))
-    limit = int(request.query.get('limit', '10'))
-
     tracks = [get_tags(uuid)
               for uuid in transmitter_queue.queue]
 
     return web.json_response({'total': len(tracks),
-                              'items': paginate(tracks, start, limit)})
+                              'items': tracks})
 
 
 def enqueue(request):
