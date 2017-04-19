@@ -158,10 +158,11 @@ async def index(request):
 
 
 if __name__ == '__main__':
-    if conf.getboolean('GENERAL', 'Debug'):
+    debug = conf.getboolean('GENERAL', 'Debug')
+    if debug:
         logging.basicConfig(level=logging.DEBUG)
 
-    app = web.Application()
+    app = web.Application(debug=debug)
 
     app.router.add_get('/api/info', info)
 
@@ -176,4 +177,4 @@ if __name__ == '__main__':
     app.router.add_get('/', index)
     app.router.add_static('/', conf.get('PATHS', 'Resources'))
 
-    web.run_app(app, host='0.0.0.0', port=8080)
+    web.run_app(app, host='0.0.0.0', port=8080, )
