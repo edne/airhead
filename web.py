@@ -165,10 +165,6 @@ def broadcast_playlist_update():
         client.send_json({'update': 'playlist'})
 
 
-def broadcaster_shutdown(app):
-    app['broadcaster'].join()
-
-
 app = web.Application()
 
 app['config'] = get_config()
@@ -189,14 +185,14 @@ app.router.add_route('GET', '/api/ws', websocket)
 app.router.add_static('/', app['config'].get('GENERAL', 'Frontend'))
 
 app.on_shutdown.append(websocket_shutdown)
-app.on_shutdown.append(broadcaster_shutdown)
 
 if app['config'].getboolean('GENERAL', 'Debug'):
     logging.basicConfig(level=logging.DEBUG)
 else:
     logging.basicConfig(level=logging.WARNING)
 
-app['broadcaster'].start()
-web.run_app(app,
-            host=app['config'].get('GENERAL', 'Address'),
-            port=app['config'].getint('GENERAL', 'Port'))
+if __name__ == '__main__':
+    app['broadcaster'].start()
+    web.run_app(app,
+                host=app['config'].get('GENERAL', 'Address'),
+                port=app['config'].getint('GENERAL', 'Port'))
